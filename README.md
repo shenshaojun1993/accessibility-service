@@ -78,9 +78,22 @@ public enum PaymentEnum {
 
 全局线程池以及初始化逻辑如下
 ```java
+    private static final ExecutorService THREAD_POOL;
 
+    static {
+        // 初始化全局线程池
+        ThreadFactory namedThreadFactory = new ThreadFactoryBuilder().setNameFormat("demo-pool-%d").build();
+        int paymentNum = PaymentEnum.values().length;
+        THREAD_POOL = new ThreadPoolExecutor(paymentNum, 3 * paymentNum, 0L, TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(paymentNum), namedThreadFactory, new ThreadPoolExecutor.AbortPolicy());
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.error("Application is going to be closed, demo thread is being closed...");
+            shutdownAndAwaitTermination();
+            log.error("Demo thread closed.");
+        }));
+    }
 ```
-
 
 
 定期更新的逻辑如下
@@ -123,6 +136,22 @@ public enum PaymentEnum {
         return CACHE.values().stream().toList();
     }
 ```
+
+# 测试验证
+21:28分 第一次请求
+![img.png](img.png)
+
+第1行为首次请求触发强制更新，后续为每分钟定时刷新缓存
+```shell
+2024-09-11T21:28:10.036+08:00  WARN 17560 --- [nio-8080-exec-1] c.e.s.accessibility.cache.PaymentCache   : The cache is expired, force to update it.
+2024-09-11T21:29:00.009+08:00  INFO 17560 --- [   scheduling-1] c.e.shen.accessibility.DemoApplication   : begin refreshing available cache
+2024-09-11T21:29:00.331+08:00  INFO 17560 --- [   scheduling-1] c.e.shen.accessibility.DemoApplication   : end refreshing available cache
+2024-09-11T21:30:00.013+08:00  INFO 17560 --- [   scheduling-1] c.e.shen.accessibility.DemoApplication   : begin refreshing available cache
+2024-09-11T21:30:00.446+08:00  INFO 17560 --- [   scheduling-1] c.e.shen.accessibility.DemoApplication   : end refreshing available cache
+```
+21:31分 第二次请求
+![img_2.png](img_2.png)
+
 
 # 优化及演进方向
 1. 在服务多实例场景下，存在多个实例同时批量查询远端服务，可以考虑将进程内的缓存放入Redis中，并且使用setnx+lua脚本实现分布式锁，仅让一个实例刷新缓存。
